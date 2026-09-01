@@ -15,10 +15,13 @@
 import logging
 import os
 import subprocess
+import warnings
 from typing import Any, Dict, Optional, Tuple
 
 import aiohttp
 import tornado.ioloop
+
+warnings.filterwarnings("ignore")
 
 # Strict requirement: Must be running in an environment with scheduler_jupyter_plugin installed
 try:

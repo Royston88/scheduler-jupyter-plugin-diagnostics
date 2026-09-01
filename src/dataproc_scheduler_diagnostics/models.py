@@ -18,11 +18,11 @@ from pydantic import BaseModel, Field
 
 class JobScheduleParams(BaseModel):
     """Parameters required to render and schedule an Airflow DAG notebook job."""
-    name: str = Field(..., description="Unique job identifier")
+    name: str = Field(default="scheduled-notebook-job", description="Unique job identifier")
     dag_id: Optional[str] = Field(default=None, description="Airflow DAG ID (defaults to dag_<name>)")
-    composer_environment_name: str = Field(default="my-airflow-composer", description="Target Composer environment name")
-    input_filename: str = Field(default="Basic Spark.ipynb", description="Input notebook filename")
-    cluster_name: str = Field(default="pyspark-cluster-dev-multitenant", description="Target Dataproc cluster")
+    composer_environment_name: str = Field(default="", description="Target Composer environment name")
+    input_filename: str = Field(default="notebook.ipynb", description="Input notebook filename")
+    cluster_name: str = Field(default="", description="Target Dataproc cluster")
     mode_selected: str = Field(default="cluster", description="Execution mode: 'cluster' or 'serverless'")
     local_kernel: bool = Field(default=False, description="Whether job runs locally in Airflow worker")
     schedule_value: str = Field(default="@once", description="Cron schedule expression or @once")

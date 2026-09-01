@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-A pure, native CLI harness for the official **`scheduler_jupyter_plugin`** installed on **Google Cloud Vertex AI Workbench**.
+A pure, native diagnostic and dry-run CLI harness for the official **`scheduler_jupyter_plugin`** package installed on **Google Cloud Vertex AI Workbench**.
 
 ---
 
@@ -17,7 +17,7 @@ This CLI directly invokes the **official, installed `scheduler_jupyter_plugin` p
 3. **`schedule`**: Live-create and upload the job, DAG, and notebook payload directly to Cloud Composer from the terminal without using the web UI.
 
 > [!NOTE]
-> This tool contains **zero simulations, mock overrides, or cloned templates**. It strictly executes the real, official plugin package installed on the notebook VM.
+> This tool contains **zero simulations, mock overrides, or cloned templates**. It strictly executes the real, official plugin package installed on the notebook VM to guarantee zero false positives.
 
 ---
 
@@ -35,10 +35,10 @@ cd scheduler-jupyter-plugin-diagnostics
 ```
 
 ### Step 3: Install into Notebook Managed Python Environment
-Workbench JupyterLab runs in `/opt/micromamba/envs/jupyterlab`. Install the CLI in editable mode:
+Workbench JupyterLab runs in `/opt/micromamba/envs/jupyterlab`. Install the CLI in editable mode (using `--no-deps` to preserve existing environment packages):
 
 ```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m pip install -e .
+/opt/micromamba/envs/jupyterlab/bin/python3 -m pip install --no-deps -e .
 ```
 
 ---
@@ -50,7 +50,7 @@ Validates Dataproc cluster accessibility, dynamic multi-tenancy properties, and 
 
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli diagnose \
-    --cluster=my-dataproc-multitenant-cluster
+    --cluster=<DATAPROC_CLUSTER_NAME>
 ```
 
 **Sample Output**:
@@ -84,10 +84,20 @@ Runs the official plugin's DAG generation pipeline locally and inspects if `impe
 
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli render \
-    --job-name="daily-spark-analysis" \
-    --notebook="Basic Spark.ipynb" \
-    --cluster=my-dataproc-multitenant-cluster
+    --cluster=<DATAPROC_CLUSTER_NAME> \
+    --composer-env=<COMPOSER_ENV_NAME> \
+    --job-name="test-spark-job" \
+    --notebook="notebook.ipynb"
 ```
+
+**Key Parameters**:
+- `--cluster`: Target Dataproc cluster name.
+- `--composer-env`: Cloud Composer environment name.
+- `--job-name`: Name identifier for the scheduled job (defaults to `scheduled-notebook-job`).
+- `--notebook`: Name of the notebook file in the directory (defaults to `notebook.ipynb`).
+- `--output-file`: (Optional) Path to save the rendered Airflow DAG python script locally.
+- `--mode`: (Optional) Execution mode: `cluster` (default) or `serverless`.
+- `--local-kernel`: (Optional) Render DAG for execution in the local Airflow worker container.
 
 ---
 
@@ -96,10 +106,10 @@ Executes the full in-process job creation, renders the DAG, and synchronizes all
 
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli schedule \
+    --cluster=<DATAPROC_CLUSTER_NAME> \
+    --composer-env=<COMPOSER_ENV_NAME> \
     --job-name="daily-spark-analysis" \
-    --notebook="Basic Spark.ipynb" \
-    --cluster=my-dataproc-multitenant-cluster \
-    --composer-env=my-airflow-composer
+    --notebook="notebook.ipynb"
 ```
 
 ---

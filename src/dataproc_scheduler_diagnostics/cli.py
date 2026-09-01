@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
+warnings.filterwarnings("ignore")
+
 import argparse
 import json
 import os
@@ -23,6 +26,11 @@ from .models import JobScheduleParams
 
 
 def run_diagnose_action(harness: NativePluginHarness, cluster_name: str, as_json: bool = False):
+    if not cluster_name:
+        print("[!] Error: --cluster is required for the 'diagnose' action.")
+        print("    Usage: scheduler-plugin-diag diagnose --cluster=<DATAPROC_CLUSTER_NAME>")
+        sys.exit(1)
+
     diag = harness.diagnose(cluster_name)
 
     if as_json:
@@ -62,13 +70,16 @@ def run_diagnose_action(harness: NativePluginHarness, cluster_name: str, as_json
 
 
 def run_render_action(harness: NativePluginHarness, params: JobScheduleParams, output_file: str = None):
+    if params.mode_selected == "cluster" and not params.local_kernel and not params.cluster_name:
+        print("[!] Warning: --cluster was not specified. The DAG template may not resolve cluster properties.")
+
     dag_content, has_impersonation, local_path = harness.render(params)
 
     print("=" * 65)
     print("           NATIVE AIRFLOW DAG DRY-RUN RENDERING RESULT          ")
     print("=" * 65)
     print(f"Job Name          : {params.name}")
-    print(f"Cluster           : {params.cluster_name}")
+    print(f"Cluster           : {params.cluster_name or '[None]'}")
     print(f"Generated File    : {local_path}")
     print(f"Impersonation     : {'[✓] INJECTED' if has_impersonation else '[✗] OMITTED'}")
     print("-" * 65)
@@ -84,6 +95,11 @@ def run_render_action(harness: NativePluginHarness, params: JobScheduleParams, o
 
 
 def run_schedule_action(harness: NativePluginHarness, params: JobScheduleParams):
+    if not params.composer_environment_name:
+        print("[!] Error: --composer-env is required for the 'schedule' action.")
+        print("    Usage: scheduler-plugin-diag schedule --composer-env=<COMPOSER_ENV_NAME> ...")
+        sys.exit(1)
+
     print("=" * 65)
     print("        EXECUTING LIVE JOB CREATION VIA SCHEDULER PLUGIN        ")
     print("=" * 65)
@@ -112,7 +128,7 @@ Examples:
   scheduler-plugin-diag diagnose --cluster=my-dataproc-cluster
 
   # Dry-run DAG generation and impersonation inspection
-  scheduler-plugin-diag render --job-name=demo-job --cluster=my-dataproc-cluster
+  scheduler-plugin-diag render --job-name=demo-job --cluster=my-dataproc-cluster --composer-env=my-composer-env
 
   # Live schedule job to Cloud Composer via installed plugin
   scheduler-plugin-diag schedule --job-name=demo-job --cluster=my-dataproc-cluster --composer-env=my-composer-env
@@ -124,10 +140,10 @@ Examples:
         choices=["diagnose", "render", "schedule"],
         help="Action to perform using installed scheduler_jupyter_plugin",
     )
-    parser.add_argument("--cluster", default="pyspark-cluster-dev-multitenant", help="Target Dataproc cluster name")
-    parser.add_argument("--composer-env", default="my-airflow-composer", help="Composer Environment Name")
-    parser.add_argument("--job-name", default="cli-scheduled-job", help="Job name identifier")
-    parser.add_argument("--notebook", default="Basic Spark.ipynb", help="Notebook filename")
+    parser.add_argument("--cluster", default="", help="Target Dataproc cluster name")
+    parser.add_argument("--composer-env", default="", help="Composer Environment Name")
+    parser.add_argument("--job-name", default="scheduled-notebook-job", help="Job name identifier")
+    parser.add_argument("--notebook", default="notebook.ipynb", help="Notebook filename")
     parser.add_argument("--mode", default="cluster", choices=["cluster", "serverless"], help="Execution mode")
     parser.add_argument("--local-kernel", action="store_true", help="Run job locally in Airflow worker")
     parser.add_argument("--output-file", help="Filepath to export rendered DAG")
