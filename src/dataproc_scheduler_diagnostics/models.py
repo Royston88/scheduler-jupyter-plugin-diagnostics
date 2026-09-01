@@ -19,9 +19,10 @@ from pydantic import BaseModel, Field
 class JobScheduleParams(BaseModel):
     """Parameters required to render and schedule an Airflow DAG notebook job."""
     name: str = Field(..., description="Unique job identifier")
-    input_filename: str = Field(default="Basic Spark.ipynb", description="Input notebook filename or GCS URI")
+    dag_id: Optional[str] = Field(default=None, description="Airflow DAG ID (defaults to dag_<name>)")
+    composer_environment_name: str = Field(default="my-airflow-composer", description="Target Composer environment name")
+    input_filename: str = Field(default="Basic Spark.ipynb", description="Input notebook filename")
     cluster_name: str = Field(default="pyspark-cluster-dev-multitenant", description="Target Dataproc cluster")
-    composer_bucket: str = Field(default="", description="Target Composer GCS bucket name")
     mode_selected: str = Field(default="cluster", description="Execution mode: 'cluster' or 'serverless'")
     local_kernel: bool = Field(default=False, description="Whether job runs locally in Airflow worker")
     schedule_value: str = Field(default="@once", description="Cron schedule expression or @once")
@@ -34,25 +35,46 @@ class JobScheduleParams(BaseModel):
     parameters: List[str] = Field(default_factory=list, description="Notebook papermill parameters")
     time_zone: str = Field(default="", description="Schedule time zone")
 
+    def to_plugin_payload(self) -> Dict:
+        """Converts to payload dictionary expected by scheduler_jupyter_plugin."""
+        dag_id = self.dag_id or f"dag_{self.name}"
+        return {
+            "name": self.name,
+            "dag_id": dag_id,
+            "composer_environment_name": self.composer_environment_name,
+            "input_filename": self.input_filename,
+            "cluster_name": self.cluster_name,
+            "mode_selected": self.mode_selected,
+            "selected_mode": self.mode_selected,
+            "local_kernel": self.local_kernel,
+            "schedule_value": self.schedule_value,
+            "retry_count": self.retry_count,
+            "retry_delay": self.retry_delay,
+            "email_failure": self.email_failure,
+            "email_delay": self.email_delay,
+            "email_success": self.email_success,
+            "email": self.email,
+            "parameters": self.parameters,
+            "time_zone": self.time_zone,
+            "output_formats": ["html"],
+            "stop_cluster": False,
+            "packages_to_install": [],
+            "serverless_name": {},
+        }
+
 
 class DiagnosticResult(BaseModel):
-    """Diagnostic audit result containing details of the impersonation resolution chain."""
+    """Result of native pre-flight diagnostic check."""
+    plugin_version: str
     cluster_name: str
-    user_email: str
+    active_account: str
+    project_id: str
+    region_id: str
     cluster_accessible: bool
-    plugin_source: str = "standalone_engine"
-    dynamic_multi_tenancy_raw: Optional[str] = None
     dynamic_multi_tenancy_enabled: bool = False
+    raw_properties: Dict[str, str] = Field(default_factory=dict)
     user_service_account_mapping: Dict[str, str] = Field(default_factory=dict)
     resolved_target_sa: str = ""
-    token_generation_success: bool = False
+    impersonation_chain_injected: bool = False
+    token_creator_verified: bool = False
     skip_reason: Optional[str] = None
-
-
-class RenderResult(BaseModel):
-    """Result of DAG template rendering."""
-    template_used: str
-    multi_tenant_service_account: str
-    has_impersonation_chain: bool
-    diagnostics: DiagnosticResult
-    dag_content: str

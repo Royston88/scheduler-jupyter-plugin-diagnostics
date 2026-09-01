@@ -1,9 +1,9 @@
-# Scheduler Jupyter Plugin Diagnostics
+# Scheduler Jupyter Plugin Diagnostics CLI
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-A lightweight, production-grade diagnostic CLI and DAG validation tool for **JupyterLab Scheduler Plugin**, **Cloud Composer**, and **Dataproc Dynamic Multi-Tenancy**.
+A pure, native CLI harness for the official **`scheduler_jupyter_plugin`** installed on **Google Cloud Vertex AI Workbench**.
 
 ---
 
@@ -11,131 +11,102 @@ A lightweight, production-grade diagnostic CLI and DAG validation tool for **Jup
 
 When scheduling Jupyter notebooks to run on multi-tenant Dataproc clusters via Cloud Composer, Cloud Composer's worker service account must impersonate the specific end-user's service account using `impersonation_chain=['<user-sa>']` in `DataprocSubmitJobOperator`.
 
-However, the Airflow DAG generation template wraps impersonation inside a conditional check:
-```jinja
-{% if multi_tenant_service_account %}
-impersonation_chain=['{{multi_tenant_service_account}}'],
-{% endif %}
-```
-If `multi_tenant_service_account` evaluates to an empty string (`""`), the template **silently omits** the impersonation chain without raising any errors or warnings.
+This CLI directly invokes the **official, installed `scheduler_jupyter_plugin` package** running inside your Workbench notebook instance to:
+1. **`diagnose`**: Perform pre-flight audits using the real plugin credentials, Dataproc API endpoints, and user account mapping.
+2. **`render`**: Dry-run DAG rendering via the plugin's internal `prepare_dag()` pipeline to verify whether `impersonation_chain` is generated before submitting.
+3. **`schedule`**: Live-create and upload the job, DAG, and notebook payload directly to Cloud Composer from the terminal without using the web UI.
 
-This tool provides:
-1. **Pre-flight Environment Diagnostics** (`diagnose`): Validates Dataproc multi-tenancy properties, `userServiceAccountMapping`, active identity, and IAM Token Creator permissions.
-2. **Dry-Run DAG Rendering** (`render`): Generates and inspects Airflow DAG files locally without uploading to Cloud Storage.
-3. **Automated 6-Scenario Test Matrix** (`test-matrix`): Simulates and validates nominal and failure scenarios.
-4. **Hybrid Bridge Support** (`--installed-plugin`): Runs either as a standalone engine or directly invokes the VM's pre-installed `scheduler_jupyter_plugin` package.
+> [!NOTE]
+> This tool contains **zero simulations, mock overrides, or cloned templates**. It strictly executes the real, official plugin package installed on the notebook VM.
 
 ---
 
-## 🏗️ Architecture & Decision Logic
+## 💻 Installation on Vertex AI Workbench (Notebook Terminal)
 
-```mermaid
-flowchart TD
-    A["Job Creation Triggered"] --> B{"local_kernel == True?"}
-    B -- Yes --> B1["Render localPythonTemplate<br/>(No Dataproc operator)"]
-    B -- No --> C{"mode_selected == 'serverless'?"}
-    C -- Yes --> C1["Render pysparkBatchTemplate<br/>(No impersonation support in template)"]
-    C -- No --> D["Query Dataproc Cluster API"]
-    D --> E{"API Call Succeeded?"}
-    E -- No (401/403/404) --> E1["Silent Dict Fallback -> multi_tenant_sa = ''<br/>(Impersonation OMITTED)"]
-    E -- Yes --> F{"dataproc.dynamic.multi.tenancy.enabled == 'true'?"}
-    F -- No / Missing --> F1["multi_tenant_sa = ''<br/>(Impersonation OMITTED)"]
-    F -- Yes --> G{"User in userServiceAccountMapping?"}
-    G -- No (Key/Casing Mismatch) --> G1["multi_tenant_sa = ''<br/>(Impersonation OMITTED)"]
-    G -- Yes --> H["multi_tenant_sa = target_sa<br/>(Impersonation INJECTED)"]
-```
-
----
-
-## 💻 Installation & Usage in Vertex AI Workbench (Notebook Terminal)
-
-Follow these steps to run diagnostics directly inside any Google Cloud Vertex AI Workbench Notebook instance:
+Follow these steps inside any Vertex AI Workbench Notebook instance:
 
 ### Step 1: Open Terminal in JupyterLab
-1. Open your Workbench instance in Google Cloud Console.
-2. Click **File** → **New** → **Terminal**.
+In your JupyterLab navigation bar, click **File** → **New** → **Terminal**.
 
-### Step 2: Clone or Upload the Repository
+### Step 2: Clone or Copy Repository
 ```bash
-# Option A: Clone from GitHub inside notebook terminal
 git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git
 cd scheduler-jupyter-plugin-diagnostics
-
-# Option B: (If uploading via gcloud SCP from your local machine)
-# gcloud compute scp --recurse ./scheduler-jupyter-plugin-diagnostics <NOTEBOOK_INSTANCE_NAME>:/home/jupyter/ --zone=<ZONE>
 ```
 
-### Step 3: Install into Notebook Runtime
-Workbench JupyterLab runs in a managed environment (`/opt/micromamba/envs/jupyterlab`). Install the CLI in editable mode:
+### Step 3: Install into Notebook Managed Python Environment
+Workbench JupyterLab runs in `/opt/micromamba/envs/jupyterlab`. Install the CLI in editable mode:
 
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m pip install -e .
 ```
 
-### Step 4: Run Diagnostic Commands
+---
 
-#### 1. Pre-Flight Diagnostics (Using Installed Plugin Package)
-Uses the notebook VM's real credentials and official `scheduler_jupyter_plugin` code:
+## 🚀 Usage & Commands
+
+### 1. Pre-Flight Diagnostic Audit (`diagnose`)
+Validates Dataproc cluster accessibility, dynamic multi-tenancy properties, and user identity mapping directly via the installed plugin:
+
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli diagnose \
-    --cluster=my-dataproc-multitenant-cluster \
-    --installed-plugin
+    --cluster=my-dataproc-multitenant-cluster
 ```
 
-#### 2. Dry-Run Render Airflow DAG & Inspect Impersonation
+**Sample Output**:
+```text
+=================================================================
+   NATIVE SCHEDULER PLUGIN PRE-FLIGHT & IMPERSONATION AUDIT      
+=================================================================
+Plugin Version : 0.1.7 (Official Installed Package)
+Project ID     : my-gcp-project
+Region ID      : us-central1
+Target Cluster : my-dataproc-multitenant-cluster
+Active Account : user-1@example.com
+-----------------------------------------------------------------
+1. Dataproc Cluster Accessible : [✓] PASS
+2. Dynamic Multi-Tenancy Value : 'true'
+   -> Multi-Tenancy Enabled    : [✓] PASS
+3. User Mapping Configured     : {
+  "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
+}
+4. Target Service Account      : 'data-user-sa@my-gcp-project.iam.gserviceaccount.com'
+   -> Impersonation Chain Status: [✓] INJECTED (data-user-sa@my-gcp-project.iam.gserviceaccount.com)
+5. Probing Token Creator IAM Permissions...
+   -> Token Generation Test    : [✓] SUCCESS
+=================================================================
+```
+
+---
+
+### 2. Dry-Run Render DAG & Check Impersonation (`render`)
+Runs the official plugin's DAG generation pipeline locally and inspects if `impersonation_chain` was injected without uploading to Cloud Storage:
+
 ```bash
 /opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli render \
-    --job-name="my-spark-job" \
+    --job-name="daily-spark-analysis" \
     --notebook="Basic Spark.ipynb" \
-    --cluster=my-dataproc-multitenant-cluster \
-    --output-file="./test_dag.py"
-```
-
-#### 3. Run the 6-Scenario Test Matrix
-```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli test-matrix \
-    --output-dir=./test_results
-```
-
-#### 4. Quick Smoke Test (Method 1 Helper Script)
-```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 scripts/test_installed_plugin.py \
     --cluster=my-dataproc-multitenant-cluster
 ```
 
 ---
 
-## 🖥️ Local Workstation Installation (Laptop / Cloudtop)
+### 3. Live Schedule Job to Cloud Composer (`schedule`)
+Executes the full in-process job creation, renders the DAG, and synchronizes all artifacts to Cloud Composer's GCS bucket:
 
-### 1. Install Package
 ```bash
-git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git
-cd scheduler-jupyter-plugin-diagnostics
-
-pip install -e .
-```
-
-### 2. Prerequisites
-* Python 3.9+
-* `gcloud` authenticated with access to the target project and Dataproc cluster:
-  ```bash
-  gcloud auth login
-  gcloud auth application-default login
-  ```
-
-### 3. Run Standalone CLI
-```bash
-scheduler-plugin-diag diagnose \
+/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli schedule \
+    --job-name="daily-spark-analysis" \
+    --notebook="Basic Spark.ipynb" \
     --cluster=my-dataproc-multitenant-cluster \
-    --project=my-gcp-project \
-    --region=us-central1
+    --composer-env=my-airflow-composer
 ```
 
 ---
 
 ## 🔍 Root Cause Troubleshooting Guide
 
-| Issue Symptom | Underlying Cause | Remediation |
+| Issue Symptom | Underlying Cause in Plugin | Remediation |
 | :--- | :--- | :--- |
 | **`impersonation_chain` missing in generated DAG** | Active `gcloud` account does not match key in `userServiceAccountMapping`. | Ensure `gcloud config get account` matches the exact email (case-sensitive) mapped during cluster creation. |
 | **`impersonation_chain` missing on multi-tenant cluster** | Property `dataproc:dataproc.dynamic.multi.tenancy.enabled` is missing or not lowercase `"true"`. | Recreate cluster with `--properties=dataproc:dataproc.dynamic.multi.tenancy.enabled=true`. |

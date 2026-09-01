@@ -18,301 +18,149 @@ import os
 import sys
 from typing import List
 
-from .engine import DiagnosticEngine
+from .client import NativePluginHarness
 from .models import JobScheduleParams
 
 
-def run_diagnostics_cmd(engine: DiagnosticEngine, cluster_name: str, as_json: bool = False):
-    target_sa, diag = engine.resolve_multi_tenant_sa(cluster_name)
-    token_ok = engine.probe_token_creator_permission(target_sa) if target_sa else False
-    diag.token_generation_success = token_ok
+def run_diagnose_action(harness: NativePluginHarness, cluster_name: str, as_json: bool = False):
+    diag = harness.diagnose(cluster_name)
 
     if as_json:
-        print(diag.model_dump_json(indent=2))
+        if hasattr(diag, "model_dump_json"):
+            print(diag.model_dump_json(indent=2))
+        else:
+            print(diag.json(indent=2))
         return
 
     print("=" * 65)
-    print("     SCHEDULER PLUGIN PRE-FLIGHT & IMPERSONATION DIAGNOSTICS     ")
+    print("   NATIVE SCHEDULER PLUGIN PRE-FLIGHT & IMPERSONATION AUDIT      ")
     print("=" * 65)
-    print(f"Engine Type: {diag.plugin_source}")
-    print(f"Project ID : {engine.project_id or '[Not configured]'}")
-    print(f"Region ID  : {engine.region_id}")
-    print(f"Cluster    : {cluster_name}")
-    print(f"Active User: {diag.user_email}")
+    print(f"Plugin Version : {diag.plugin_version} (Official Installed Package)")
+    print(f"Project ID     : {diag.project_id}")
+    print(f"Region ID      : {diag.region_id}")
+    print(f"Target Cluster : {diag.cluster_name}")
+    print(f"Active Account : {diag.active_account}")
     print("-" * 65)
     print(f"1. Dataproc Cluster Accessible : {'[✓] PASS' if diag.cluster_accessible else '[✗] FAIL'}")
-    print(f"2. Dynamic Multi-Tenancy Value : '{diag.dynamic_multi_tenancy_raw}'")
-    print(f"   -> Evaluates to Enabled     : {'[✓] PASS' if diag.dynamic_multi_tenancy_enabled else '[✗] FAIL'}")
+    mt_raw = diag.raw_properties.get("dataproc:dataproc.dynamic.multi.tenancy.enabled", "not set")
+    print(f"2. Dynamic Multi-Tenancy Value : '{mt_raw}'")
+    print(f"   -> Multi-Tenancy Enabled    : {'[✓] PASS' if diag.dynamic_multi_tenancy_enabled else '[✗] FAIL'}")
     print(f"3. User Mapping Configured     : {json.dumps(diag.user_service_account_mapping, indent=2)}")
     
-    sa_display = target_sa if target_sa else "[None]"
+    sa_display = diag.resolved_target_sa if diag.resolved_target_sa else "[None]"
     print(f"4. Target Service Account      : '{sa_display}'")
 
-    if target_sa:
-        print(f"   -> Impersonation Chain Status: [✓] INJECTED ({target_sa})")
+    if diag.impersonation_chain_injected:
+        print(f"   -> Impersonation Chain Status: [✓] INJECTED ({diag.resolved_target_sa})")
         print("5. Probing Token Creator IAM Permissions...")
-        status_str = "[✓] SUCCESS" if token_ok else "[✗] FAILED (Check Token Creator role)"
+        status_str = "[✓] SUCCESS" if diag.token_creator_verified else "[✗] FAILED (Check Token Creator role on Target SA)"
         print(f"   -> Token Generation Test    : {status_str}")
     else:
-        print("   -> Impersonation Chain Status: [✗] NOT INJECTED")
+        print("   -> Impersonation Chain Status: [✗] NOT INJECTED (Empty string returned)")
         print(f"   -> Skip Reason: {diag.skip_reason}")
     print("=" * 65)
 
 
-def run_render_cmd(engine: DiagnosticEngine, params: JobScheduleParams, output_file: str = None, as_json: bool = False):
-    res = engine.render_dag(params)
-    if as_json:
-        print(res.model_dump_json(indent=2))
-        return
+def run_render_action(harness: NativePluginHarness, params: JobScheduleParams, output_file: str = None):
+    dag_content, has_impersonation, local_path = harness.render(params)
 
     print("=" * 65)
-    print("                 DAG RENDERING & DRY-RUN RESULT                  ")
+    print("           NATIVE AIRFLOW DAG DRY-RUN RENDERING RESULT          ")
     print("=" * 65)
-    print(f"Engine Type   : {res.diagnostics.plugin_source}")
-    print(f"Template Used : {res.template_used}")
-    sa_display = res.multi_tenant_service_account if res.multi_tenant_service_account else "[None]"
-    print(f"Target SA     : {sa_display}")
-    print(f"Impersonation : {'[✓] INJECTED' if res.has_impersonation_chain else '[✗] OMITTED'}")
-    if not res.has_impersonation_chain:
-        print(f"Skip Reason   : {res.diagnostics.skip_reason}")
+    print(f"Job Name          : {params.name}")
+    print(f"Cluster           : {params.cluster_name}")
+    print(f"Generated File    : {local_path}")
+    print(f"Impersonation     : {'[✓] INJECTED' if has_impersonation else '[✗] OMITTED'}")
     print("-" * 65)
 
     if output_file:
         os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
         with open(output_file, "w", encoding="utf-8") as f:
-            f.write(res.dag_content)
-        print(f"[✓] Rendered DAG saved to: {output_file}")
+            f.write(dag_content)
+        print(f"[✓] DAG exported to: {output_file}")
     else:
-        print(res.dag_content)
+        print(dag_content)
     print("=" * 65)
 
 
-def run_test_matrix_cmd(engine: DiagnosticEngine, output_dir: str):
-    os.makedirs(output_dir, exist_ok=True)
+def run_schedule_action(harness: NativePluginHarness, params: JobScheduleParams):
     print("=" * 65)
-    print("           EXECUTING 6-SCENARIO IMPERSONATION TEST MATRIX        ")
-    print("=" * 65 + "\n")
+    print("        EXECUTING LIVE JOB CREATION VIA SCHEDULER PLUGIN        ")
+    print("=" * 65)
+    print(f"Job Name     : {params.name}")
+    print(f"Cluster      : {params.cluster_name}")
+    print(f"Composer Env : {params.composer_environment_name}")
+    print(f"Notebook     : {params.input_filename}")
+    print("-" * 65)
 
-    scenarios = [
-        {
-            "id": "CASE_1_NOMINAL_SUCCESS",
-            "name": "Case 1: Standard Matching User on Multi-Tenant Cluster",
-            "user": "user-1@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-1-nominal", mode_selected="cluster", local_kernel=False),
-            "cluster_override": {
-                "config": {
-                    "softwareConfig": {"properties": {"dataproc:dataproc.dynamic.multi.tenancy.enabled": "true"}},
-                    "securityConfig": {
-                        "identityConfig": {
-                            "userServiceAccountMapping": {
-                                "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-                            }
-                        }
-                    },
-                }
-            },
-            "expected_injected": True,
-        },
-        {
-            "id": "CASE_2_USER_MISMATCH",
-            "name": "Case 2: User Email Mismatch (User not in mapping)",
-            "user": "unmapped_engineer@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-2-user-mismatch", mode_selected="cluster", local_kernel=False),
-            "cluster_override": {
-                "config": {
-                    "softwareConfig": {"properties": {"dataproc:dataproc.dynamic.multi.tenancy.enabled": "true"}},
-                    "securityConfig": {
-                        "identityConfig": {
-                            "userServiceAccountMapping": {
-                                "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-                            }
-                        }
-                    },
-                }
-            },
-            "expected_injected": False,
-        },
-        {
-            "id": "CASE_3_MULTITENANCY_DISABLED",
-            "name": "Case 3: Dataproc Multi-Tenancy Disabled (Property is false)",
-            "user": "user-1@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-3-no-multitenant", mode_selected="cluster", local_kernel=False),
-            "cluster_override": {
-                "config": {
-                    "softwareConfig": {"properties": {"dataproc:dataproc.dynamic.multi.tenancy.enabled": "false"}},
-                    "securityConfig": {
-                        "identityConfig": {
-                            "userServiceAccountMapping": {
-                                "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-                            }
-                        }
-                    },
-                }
-            },
-            "expected_injected": False,
-        },
-        {
-            "id": "CASE_4_SERVERLESS_MODE",
-            "name": "Case 4: Execution Mode is 'Serverless' (Batch template)",
-            "user": "user-1@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-4-serverless", mode_selected="serverless", local_kernel=False),
-            "cluster_override": {
-                "config": {
-                    "softwareConfig": {"properties": {"dataproc:dataproc.dynamic.multi.tenancy.enabled": "true"}},
-                    "securityConfig": {
-                        "identityConfig": {
-                            "userServiceAccountMapping": {
-                                "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-                            }
-                        }
-                    },
-                }
-            },
-            "expected_injected": False,
-        },
-        {
-            "id": "CASE_5_LOCAL_KERNEL",
-            "name": "Case 5: Local Kernel Selected (Local Papermill worker)",
-            "user": "user-1@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-5-local-kernel", mode_selected="cluster", local_kernel=True),
-            "cluster_override": {
-                "config": {
-                    "softwareConfig": {"properties": {"dataproc:dataproc.dynamic.multi.tenancy.enabled": "true"}},
-                    "securityConfig": {
-                        "identityConfig": {
-                            "userServiceAccountMapping": {
-                                "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-                            }
-                        }
-                    },
-                }
-            },
-            "expected_injected": False,
-        },
-        {
-            "id": "CASE_6_API_FAILURE",
-            "name": "Case 6: Dataproc API Failure / 401 Unauthorized",
-            "user": "user-1@example.com",
-            "cluster": "pyspark-cluster-dev-multitenant",
-            "params": JobScheduleParams(name="test-case-6-api-error", mode_selected="cluster", local_kernel=False),
-            "cluster_override": {"error": "HTTP 401 Unauthorized: Access token expired"},
-            "expected_injected": False,
-        },
-    ]
-
-    results = []
-    for sc in scenarios:
-        print(f"[*] Running {sc['name']}...")
-        res = engine.render_dag(
-            params=sc["params"],
-            force_cluster_data=sc["cluster_override"],
-            force_user_email=sc["user"],
-        )
-
-        dag_path = os.path.join(output_dir, f"dag_{sc['params'].name}.py")
-        with open(dag_path, "w", encoding="utf-8") as f:
-            f.write(res.dag_content)
-
-        injected = res.has_impersonation_chain
-        match_expected = injected == sc["expected_injected"]
-        status = "PASSED" if match_expected else "UNEXPECTED"
-
-        sa_val = res.multi_tenant_service_account if res.multi_tenant_service_account else "[None]"
-        print(f"    Template                     : {res.template_used}")
-        print(f"    Target Service Account       : '{sa_val}'")
-        print(f"    Impersonation Chain Injected : {injected}")
-        if not injected:
-            print(f"    Skip Reason                  : {res.diagnostics.skip_reason}")
-        print(f"    Output DAG                   : {dag_path}")
-        print(f"    Validation Status            : [{'✓' if match_expected else '✗'}] {status}\n")
-
-        results.append(
-            {
-                "id": sc["id"],
-                "name": sc["name"],
-                "template": res.template_used,
-                "target_sa": res.multi_tenant_service_account,
-                "impersonation_injected": injected,
-                "skip_reason": res.diagnostics.skip_reason,
-                "dag_file": dag_path,
-                "status": status,
-            }
-        )
-
-    summary_file = os.path.join(output_dir, "test_matrix_summary.json")
-    with open(summary_file, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2)
-    print(f"[✓] Test matrix execution complete. Summary saved to {summary_file}\n")
+    result = harness.schedule(params)
+    print("Execution Result:", json.dumps(result, indent=2))
+    if result.get("status") == 0 or "status" in str(result):
+        print("\n[✓] Job successfully created and synchronized to Composer!")
+    else:
+        print("\n[✗] Job creation reported error:", result)
+    print("=" * 65)
 
 
 def main(args: List[str] = None):
     parser = argparse.ArgumentParser(
-        description="Dataproc & Composer Scheduler Diagnostics CLI",
+        description="Native Scheduler Jupyter Plugin CLI for Vertex AI Workbench",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Pre-flight environment diagnostics
+  # Pre-flight environment diagnostics using the installed plugin
   scheduler-plugin-diag diagnose --cluster=my-dataproc-cluster
 
-  # Pre-flight diagnostics using the VM's installed plugin package
-  scheduler-plugin-diag diagnose --cluster=my-dataproc-cluster --installed-plugin
-
-  # Dry-run DAG generation and inspection
+  # Dry-run DAG generation and impersonation inspection
   scheduler-plugin-diag render --job-name=demo-job --cluster=my-dataproc-cluster
 
-  # Run the full 6-scenario impersonation test matrix
-  scheduler-plugin-diag test-matrix --output-dir=/tmp/test_outputs
+  # Live schedule job to Cloud Composer via installed plugin
+  scheduler-plugin-diag schedule --job-name=demo-job --cluster=my-dataproc-cluster --composer-env=my-composer-env
         """,
     )
 
     parser.add_argument(
         "action",
-        choices=["diagnose", "render", "test-matrix"],
-        help="Diagnostic or simulation action to perform",
+        choices=["diagnose", "render", "schedule"],
+        help="Action to perform using installed scheduler_jupyter_plugin",
     )
-    parser.add_argument("--project", help="GCP Project ID (default: gcloud config get project)")
-    parser.add_argument("--region", help="GCP Region ID (default: gcloud config get dataproc/region)")
     parser.add_argument("--cluster", default="pyspark-cluster-dev-multitenant", help="Target Dataproc cluster name")
-    parser.add_argument("--composer-bucket", default="", help="Composer GCS bucket name")
-    parser.add_argument("--job-name", default="diagnostic-test-job", help="Job name identifier")
-    parser.add_argument("--notebook", default="Basic Spark.ipynb", help="Notebook filename or GCS URI")
-    parser.add_argument("--user-email", help="Override user identity to test mapping resolution")
-    parser.add_argument("--installed-plugin", action="store_true", help="Use installed scheduler_jupyter_plugin package if available")
-    parser.add_argument("--output-file", help="Filepath to write rendered DAG file")
-    parser.add_argument("--output-dir", default="./outputs", help="Output directory for test matrix results")
+    parser.add_argument("--composer-env", default="my-airflow-composer", help="Composer Environment Name")
+    parser.add_argument("--job-name", default="cli-scheduled-job", help="Job name identifier")
+    parser.add_argument("--notebook", default="Basic Spark.ipynb", help="Notebook filename")
+    parser.add_argument("--mode", default="cluster", choices=["cluster", "serverless"], help="Execution mode")
+    parser.add_argument("--local-kernel", action="store_true", help="Run job locally in Airflow worker")
+    parser.add_argument("--output-file", help="Filepath to export rendered DAG")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose debug logging")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
 
     parsed = parser.parse_args(args)
-    engine = DiagnosticEngine(
-        project_id=parsed.project,
-        region_id=parsed.region,
-        user_email_override=parsed.user_email,
-        use_installed_plugin=parsed.installed_plugin,
-        verbose=parsed.verbose,
-    )
+    harness = NativePluginHarness(verbose=parsed.verbose)
 
     if parsed.action == "diagnose":
-        run_diagnostics_cmd(engine, cluster_name=parsed.cluster, as_json=parsed.json)
+        run_diagnose_action(harness, cluster_name=parsed.cluster, as_json=parsed.json)
 
     elif parsed.action == "render":
         params = JobScheduleParams(
             name=parsed.job_name,
             input_filename=parsed.notebook,
             cluster_name=parsed.cluster,
-            composer_bucket=parsed.composer_bucket,
-            mode_selected="cluster",
-            local_kernel=False,
+            composer_environment_name=parsed.composer_env,
+            mode_selected=parsed.mode,
+            local_kernel=parsed.local_kernel,
         )
-        run_render_cmd(engine, params, output_file=parsed.output_file, as_json=parsed.json)
+        run_render_action(harness, params, output_file=parsed.output_file)
 
-    elif parsed.action == "test-matrix":
-        run_test_matrix_cmd(engine, output_dir=parsed.output_dir)
+    elif parsed.action == "schedule":
+        params = JobScheduleParams(
+            name=parsed.job_name,
+            input_filename=parsed.notebook,
+            cluster_name=parsed.cluster,
+            composer_environment_name=parsed.composer_env,
+            mode_selected=parsed.mode,
+            local_kernel=parsed.local_kernel,
+        )
+        run_schedule_action(harness, params)
 
 
 if __name__ == "__main__":
