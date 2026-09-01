@@ -40,6 +40,7 @@ class DiagnosticResult(BaseModel):
     cluster_name: str
     user_email: str
     cluster_accessible: bool
+    plugin_source: str = "standalone_engine"
     dynamic_multi_tenancy_raw: Optional[str] = None
     dynamic_multi_tenancy_enabled: bool = False
     user_service_account_mapping: Dict[str, str] = Field(default_factory=dict)

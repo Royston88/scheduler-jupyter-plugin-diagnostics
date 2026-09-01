@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
+import logging
 import os
 import subprocess
 from datetime import datetime, timedelta
@@ -21,6 +23,17 @@ from typing import Any, Dict, Optional, Tuple
 import jinja2
 
 from .models import DiagnosticResult, JobScheduleParams, RenderResult
+
+# Dynamic import of the installed official plugin if present on the system
+try:
+    import scheduler_jupyter_plugin
+    from scheduler_jupyter_plugin import credentials as official_credentials
+    from scheduler_jupyter_plugin.services import executor as official_executor
+    HAS_INSTALLED_PLUGIN = True
+    PLUGIN_VERSION = getattr(scheduler_jupyter_plugin, "__version__", "0.1.7")
+except ImportError:
+    HAS_INSTALLED_PLUGIN = False
+    PLUGIN_VERSION = None
 
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
 
@@ -33,6 +46,7 @@ class DiagnosticEngine:
         project_id: Optional[str] = None,
         region_id: Optional[str] = None,
         user_email_override: Optional[str] = None,
+        use_installed_plugin: bool = False,
         verbose: bool = False,
     ):
         self.project_id = project_id or self._get_gcloud_config("project") or ""
@@ -43,6 +57,7 @@ class DiagnosticEngine:
             or "us-central1"
         )
         self.user_email_override = user_email_override
+        self.use_installed_plugin = use_installed_plugin and HAS_INSTALLED_PLUGIN
         self.verbose = verbose
 
         self.jinja_env = jinja2.Environment(
@@ -94,17 +109,45 @@ class DiagnosticEngine:
         force_user_email: Optional[str] = None,
     ) -> Tuple[str, DiagnosticResult]:
         """
-        Replicates the exact decision tree used by scheduler-jupyter-plugin
-        to resolve service account impersonation.
+        Resolves service account impersonation using either the installed plugin package
+        or the standalone cloned decision engine.
         """
         user_email = force_user_email or self.get_active_user()
-        cluster_data = self.get_cluster_details(cluster_name, force_cluster_data=force_cluster_data)
 
         diag = DiagnosticResult(
             cluster_name=cluster_name,
             user_email=user_email,
-            cluster_accessible="error" not in cluster_data,
+            cluster_accessible=True,
+            plugin_source=f"installed_plugin (v{PLUGIN_VERSION})" if self.use_installed_plugin else "standalone_engine",
         )
+
+        # 1. Native bridge execution via installed plugin package
+        if self.use_installed_plugin and HAS_INSTALLED_PLUGIN and force_cluster_data is None:
+            try:
+                import aiohttp
+
+                async def _invoke_official():
+                    async with aiohttp.ClientSession() as session:
+                        creds = await official_credentials.get_cached()
+                        client = official_executor.Client(
+                            creds, logging.getLogger("SchedulerPluginDiag"), session
+                        )
+                        return await client.multi_tenant_user_service_account(cluster_name)
+
+                target_sa = asyncio.run(_invoke_official())
+                diag.resolved_target_sa = target_sa
+                if target_sa:
+                    return target_sa, diag
+                else:
+                    diag.skip_reason = "Installed plugin evaluated multi_tenant_user_service_account to empty string"
+                    return "", diag
+            except Exception as e:
+                diag.skip_reason = f"Installed plugin execution failed: {str(e)}"
+                return "", diag
+
+        # 2. Standalone decision tree execution
+        cluster_data = self.get_cluster_details(cluster_name, force_cluster_data=force_cluster_data)
+        diag.cluster_accessible = "error" not in cluster_data
 
         if "error" in cluster_data:
             diag.skip_reason = f"Dataproc API error: {cluster_data['error']}"
@@ -114,7 +157,6 @@ class DiagnosticEngine:
         mt_val = properties.get("dataproc:dataproc.dynamic.multi.tenancy.enabled", "false")
         diag.dynamic_multi_tenancy_raw = mt_val
 
-        # Exact plugin rule: case-sensitive string check == "true"
         if mt_val == "true":
             diag.dynamic_multi_tenancy_enabled = True
             mapping = (

@@ -34,6 +34,7 @@ def run_diagnostics_cmd(engine: DiagnosticEngine, cluster_name: str, as_json: bo
     print("=" * 65)
     print("     SCHEDULER PLUGIN PRE-FLIGHT & IMPERSONATION DIAGNOSTICS     ")
     print("=" * 65)
+    print(f"Engine Type: {diag.plugin_source}")
     print(f"Project ID : {engine.project_id or '[Not configured]'}")
     print(f"Region ID  : {engine.region_id}")
     print(f"Cluster    : {cluster_name}")
@@ -67,6 +68,7 @@ def run_render_cmd(engine: DiagnosticEngine, params: JobScheduleParams, output_f
     print("=" * 65)
     print("                 DAG RENDERING & DRY-RUN RESULT                  ")
     print("=" * 65)
+    print(f"Engine Type   : {res.diagnostics.plugin_source}")
     print(f"Template Used : {res.template_used}")
     sa_display = res.multi_tenant_service_account if res.multi_tenant_service_account else "[None]"
     print(f"Target SA     : {sa_display}")
@@ -255,13 +257,16 @@ def main(args: List[str] = None):
         epilog="""
 Examples:
   # Pre-flight environment diagnostics
-  dataproc-scheduler-diag diagnose --cluster=my-dataproc-cluster
+  scheduler-plugin-diag diagnose --cluster=my-dataproc-cluster
+
+  # Pre-flight diagnostics using the VM's installed plugin package
+  scheduler-plugin-diag diagnose --cluster=my-dataproc-cluster --installed-plugin
 
   # Dry-run DAG generation and inspection
-  dataproc-scheduler-diag render --job-name=demo-job --cluster=my-dataproc-cluster
+  scheduler-plugin-diag render --job-name=demo-job --cluster=my-dataproc-cluster
 
   # Run the full 6-scenario impersonation test matrix
-  dataproc-scheduler-diag test-matrix --output-dir=/tmp/test_outputs
+  scheduler-plugin-diag test-matrix --output-dir=/tmp/test_outputs
         """,
     )
 
@@ -277,6 +282,7 @@ Examples:
     parser.add_argument("--job-name", default="diagnostic-test-job", help="Job name identifier")
     parser.add_argument("--notebook", default="Basic Spark.ipynb", help="Notebook filename or GCS URI")
     parser.add_argument("--user-email", help="Override user identity to test mapping resolution")
+    parser.add_argument("--installed-plugin", action="store_true", help="Use installed scheduler_jupyter_plugin package if available")
     parser.add_argument("--output-file", help="Filepath to write rendered DAG file")
     parser.add_argument("--output-dir", default="./outputs", help="Output directory for test matrix results")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
@@ -287,6 +293,7 @@ Examples:
         project_id=parsed.project,
         region_id=parsed.region,
         user_email_override=parsed.user_email,
+        use_installed_plugin=parsed.installed_plugin,
         verbose=parsed.verbose,
     )
 
