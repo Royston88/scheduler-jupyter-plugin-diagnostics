@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 
-A lightweight, standalone diagnostic CLI and DAG generation verification tool for **JupyterLab Scheduler Plugin**, **Cloud Composer**, and **Dataproc Dynamic Multi-Tenancy**.
+A lightweight, production-grade diagnostic CLI and DAG validation tool for **JupyterLab Scheduler Plugin**, **Cloud Composer**, and **Dataproc Dynamic Multi-Tenancy**.
 
 ---
 
@@ -23,6 +23,7 @@ This tool provides:
 1. **Pre-flight Environment Diagnostics** (`diagnose`): Validates Dataproc multi-tenancy properties, `userServiceAccountMapping`, active identity, and IAM Token Creator permissions.
 2. **Dry-Run DAG Rendering** (`render`): Generates and inspects Airflow DAG files locally without uploading to Cloud Storage.
 3. **Automated 6-Scenario Test Matrix** (`test-matrix`): Simulates and validates nominal and failure scenarios.
+4. **Hybrid Bridge Support** (`--installed-plugin`): Runs either as a standalone engine or directly invokes the VM's pre-installed `scheduler_jupyter_plugin` package.
 
 ---
 
@@ -46,15 +47,72 @@ flowchart TD
 
 ---
 
-## 📦 Installation & Setup
+## 💻 Installation & Usage in Vertex AI Workbench (Notebook Terminal)
 
-### 1. Install Dependencies
+Follow these steps to run diagnostics directly inside any Google Cloud Vertex AI Workbench Notebook instance:
+
+### Step 1: Open Terminal in JupyterLab
+1. Open your Workbench instance in Google Cloud Console.
+2. Click **File** → **New** → **Terminal**.
+
+### Step 2: Clone or Upload the Repository
 ```bash
-# Option A: Install editable CLI command
-pip install -e .
+# Option A: Clone from GitHub inside notebook terminal
+git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git
+cd scheduler-jupyter-plugin-diagnostics
 
-# Option B: Install requirements directly
-pip install -r requirements.txt
+# Option B: (If uploading via gcloud SCP from your local machine)
+# gcloud compute scp --recurse ./scheduler-jupyter-plugin-diagnostics <NOTEBOOK_INSTANCE_NAME>:/home/jupyter/ --zone=<ZONE>
+```
+
+### Step 3: Install into Notebook Runtime
+Workbench JupyterLab runs in a managed environment (`/opt/micromamba/envs/jupyterlab`). Install the CLI in editable mode:
+
+```bash
+/opt/micromamba/envs/jupyterlab/bin/python3 -m pip install -e .
+```
+
+### Step 4: Run Diagnostic Commands
+
+#### 1. Pre-Flight Diagnostics (Using Installed Plugin Package)
+Uses the notebook VM's real credentials and official `scheduler_jupyter_plugin` code:
+```bash
+/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli diagnose \
+    --cluster=my-dataproc-multitenant-cluster \
+    --installed-plugin
+```
+
+#### 2. Dry-Run Render Airflow DAG & Inspect Impersonation
+```bash
+/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli render \
+    --job-name="my-spark-job" \
+    --notebook="Basic Spark.ipynb" \
+    --cluster=my-dataproc-multitenant-cluster \
+    --output-file="./test_dag.py"
+```
+
+#### 3. Run the 6-Scenario Test Matrix
+```bash
+/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli test-matrix \
+    --output-dir=./test_results
+```
+
+#### 4. Quick Smoke Test (Method 1 Helper Script)
+```bash
+/opt/micromamba/envs/jupyterlab/bin/python3 scripts/test_installed_plugin.py \
+    --cluster=my-dataproc-multitenant-cluster
+```
+
+---
+
+## 🖥️ Local Workstation Installation (Laptop / Cloudtop)
+
+### 1. Install Package
+```bash
+git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git
+cd scheduler-jupyter-plugin-diagnostics
+
+pip install -e .
 ```
 
 ### 2. Prerequisites
@@ -65,81 +123,13 @@ pip install -r requirements.txt
   gcloud auth application-default login
   ```
 
----
-
-## 🚀 Quickstart & Usage
-
-### 1. Pre-Flight Diagnostic Audit
-Audit the Dataproc cluster and verify if the active user correctly resolves to a target service account:
-
+### 3. Run Standalone CLI
 ```bash
-# If installed via pip:
 scheduler-plugin-diag diagnose \
     --cluster=my-dataproc-multitenant-cluster \
     --project=my-gcp-project \
     --region=us-central1
-
-# Or run directly via Python module:
-PYTHONPATH=src python3 -m dataproc_scheduler_diagnostics.cli diagnose \
-    --cluster=my-dataproc-multitenant-cluster \
-    --project=my-gcp-project \
-    --region=us-central1
 ```
-
-**Sample Output**:
-```text
-=================================================================
-     SCHEDULER PLUGIN PRE-FLIGHT & IMPERSONATION DIAGNOSTICS     
-=================================================================
-Project ID : my-gcp-project
-Region ID  : us-central1
-Cluster    : my-dataproc-multitenant-cluster
-Active User: user-1@example.com
------------------------------------------------------------------
-1. Dataproc Cluster Accessible : [✓] PASS
-2. Dynamic Multi-Tenancy Value : 'true'
-   -> Evaluates to Enabled     : [✓] PASS
-3. User Mapping Configured     : {
-  "user-1@example.com": "data-user-sa@my-gcp-project.iam.gserviceaccount.com"
-}
-4. Target Service Account      : 'data-user-sa@my-gcp-project.iam.gserviceaccount.com'
-   -> Impersonation Chain Status: [✓] INJECTED (data-user-sa@my-gcp-project.iam.gserviceaccount.com)
-5. Probing Token Creator IAM Permissions...
-   -> Token Generation Test    : [✓] SUCCESS
-=================================================================
-```
-
----
-
-## 🧪 2. Dry-Run DAG Rendering
-Render the Airflow DAG locally to verify parameters and syntax before scheduling:
-
-```bash
-scheduler-plugin-diag render \
-    --job-name="daily-spark-etl" \
-    --notebook="Basic Spark.ipynb" \
-    --cluster="my-dataproc-multitenant-cluster" \
-    --output-file="./output_dag.py"
-```
-
----
-
-## 📊 3. Run the 6-Scenario Test Matrix
-Execute the automated test suite across all 6 nominal and edge-case scenarios:
-
-```bash
-scheduler-plugin-diag test-matrix --output-dir=./test_results
-```
-
-**Results Matrix**:
-| Scenario | Mode / Conditions | Target SA Resolved | Impersonation Injected | Status | Skip Reason |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Case 1: Nominal** | Cluster mode, Multi-tenancy enabled, Valid user | `data-user-sa@...` | ✅ **True** | ✅ PASS | None (Injected as expected) |
-| **Case 2: User Mismatch** | Cluster mode, User not in mapping | `""` | ❌ **False** | ✅ PASS | User not found in `userServiceAccountMapping` |
-| **Case 3: Multi-Tenancy Disabled** | Cluster property `enabled: false` | `""` | ❌ **False** | ✅ PASS | `dataproc.dynamic.multi.tenancy.enabled` is `false` |
-| **Case 4: Serverless Mode** | Serverless / Batch execution mode | `data-user-sa@...` | ❌ **False** | ✅ PASS | Template `pysparkBatchTemplate-v1.txt` lacks impersonation support |
-| **Case 5: Local Kernel** | Local kernel selected | `data-user-sa@...` | ❌ **False** | ✅ PASS | Rendered `localPythonTemplate-v1.txt` |
-| **Case 6: Dataproc API Failure** | Expired token / 401 Unauthorized | `""` | ❌ **False** | ✅ PASS | Dataproc API error: HTTP 401 Unauthorized |
 
 ---
 
