@@ -166,6 +166,28 @@ $PYTHON_EXEC -m dataproc_scheduler_diagnostics.cli schedule \
 
 ---
 
+## 🔐 Authentication & IAM Permissions
+
+The diagnostic CLI runs with the **exact same identity and permission model** as clicking the "Schedule Notebook" button in the JupyterLab UI. No elevated or super-user permissions are required.
+
+### Execution Identity
+The tool invokes Google's native credentials resolver:
+```python
+from scheduler_jupyter_plugin import credentials as plugin_credentials
+creds = await plugin_credentials.get_cached()
+```
+This automatically retrieves OAuth credentials from the Workbench instance's service account (or the active `gcloud` user).
+
+### Required IAM Roles
+
+| Command | Action | Standard IAM Roles Required |
+| :--- | :--- | :--- |
+| **`diagnose`** | Reads Dataproc cluster properties & identity mapping | **`roles/dataproc.viewer`** (or Editor/Admin) |
+| **`render`** | Reads cluster properties and dry-runs DAG template in local memory | **`roles/dataproc.viewer`** |
+| **`schedule`** | Reads cluster/Composer metadata and uploads DAG + notebook to Composer bucket | **`roles/dataproc.viewer`**<br/>**`roles/composer.user`**<br/>**`roles/storage.objectUser`** (on Composer GCS bucket) |
+
+---
+
 ## 📊 Impersonation Resolution Scenarios
 
 | Scenario | Mode / Conditions | Target SA Resolved | Impersonation Injected | Reason / Mechanism |
