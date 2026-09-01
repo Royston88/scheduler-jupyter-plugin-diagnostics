@@ -125,6 +125,7 @@ class DiagnosticEngine:
         if self.use_installed_plugin and HAS_INSTALLED_PLUGIN and force_cluster_data is None:
             try:
                 import aiohttp
+                import tornado.ioloop
 
                 async def _invoke_official():
                     async with aiohttp.ClientSession() as session:
@@ -134,7 +135,7 @@ class DiagnosticEngine:
                         )
                         return await client.multi_tenant_user_service_account(cluster_name)
 
-                target_sa = asyncio.run(_invoke_official())
+                target_sa = tornado.ioloop.IOLoop.current().run_sync(_invoke_official)
                 diag.resolved_target_sa = target_sa
                 if target_sa:
                     return target_sa, diag
