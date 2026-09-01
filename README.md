@@ -56,28 +56,52 @@ Follow these steps inside any Vertex AI Workbench Notebook instance:
 
 ### Step 2: Clone or Copy Repository
 ```bash
-git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git
-cd scheduler-jupyter-plugin-diagnostics
+git clone https://github.com/Royston88/scheduler-jupyter-plugin-diagnostics.git /home/jupyter/scheduler-jupyter-plugin-diagnostics
+cd /home/jupyter/scheduler-jupyter-plugin-diagnostics
 ```
 
-*(Alternatively, copy or upload the directory to `/home/jupyter/scheduler-jupyter-plugin-diagnostics`)*.
+*(Alternatively, download or upload the zip archive to `/home/jupyter/scheduler-jupyter-plugin-diagnostics`)*.
 
 ### Step 3: Install into Notebook Managed Python Environment
-Vertex AI Workbench JupyterLab executes inside `/opt/micromamba/envs/jupyterlab`. Install the CLI in editable mode using `--no-deps` to preserve all existing JupyterLab packages:
+
+#### 🔍 Why install into the managed environment?
+On Vertex AI Workbench:
+* **JupyterLab Server & Extensions:** Google's official `scheduler_jupyter_plugin` and JupyterLab server run in a dedicated system environment:
+  * JupyterLab 4 Instances: `/opt/conda/envs/jupyterlab4/bin/python3` (or `/opt/conda/envs/jupyterlab/bin/python3`)
+  * Legacy / Micromamba Instances: `/opt/micromamba/envs/jupyterlab/bin/python3`
+* **User Notebook Kernels:** Your notebook code runs in separate user conda environments (e.g. `base`, `pytorch`, `pyspark`).
+
+To audit and test the exact code paths of the scheduler extension, the diagnostic tool must be registered in the **JupyterLab server environment**.
+
+#### 🛡️ Safe Installation with `--no-deps -e`
+* **`--no-deps`:** Guarantees that `pip` will **never** download, upgrade, downgrade, or overwrite any existing Google Cloud libraries or JupyterLab packages.
+* **`-e` (Editable Mode):** Places a single `.pth` link in `site-packages` pointing to the source directory without copying files.
 
 ```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m pip install --no-deps -e .
+# For JupyterLab 4 / Conda environments (Default on modern Workbench instances):
+/opt/conda/envs/jupyterlab4/bin/python3 -m pip install --no-deps -e .
+
+# Alternatively, for Micromamba-managed instances:
+# /opt/micromamba/envs/jupyterlab/bin/python3 -m pip install --no-deps -e .
 ```
 
 ---
 
 ## 🚀 Usage & Diagnostic Commands
 
+Run commands using the same JupyterLab Python runtime:
+
+```bash
+# Set alias or variable for convenience
+PYTHON_EXEC="/opt/conda/envs/jupyterlab4/bin/python3"
+# (or "/opt/micromamba/envs/jupyterlab/bin/python3" if on micromamba)
+```
+
 ### 1. Pre-Flight Diagnostic Audit (`diagnose`)
 Validates Dataproc cluster accessibility, dynamic multi-tenancy properties, active gcloud user identity, and IAM Token Creator permissions directly through the installed plugin runtime:
 
 ```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli diagnose \
+$PYTHON_EXEC -m dataproc_scheduler_diagnostics.cli diagnose \
     --cluster=<DATAPROC_CLUSTER_NAME>
 ```
 
@@ -111,7 +135,7 @@ Active Account : user-1@example.com
 Executes the official plugin's internal `prepare_dag()` pipeline locally. Renders the exact Airflow DAG Python code and verifies whether `impersonation_chain` is generated without uploading anything to Cloud Storage:
 
 ```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli render \
+$PYTHON_EXEC -m dataproc_scheduler_diagnostics.cli render \
     --cluster=<DATAPROC_CLUSTER_NAME> \
     --composer-env=<COMPOSER_ENV_NAME> \
     --job-name="test-spark-job" \
@@ -133,7 +157,7 @@ Executes the official plugin's internal `prepare_dag()` pipeline locally. Render
 Executes the full end-to-end job creation, renders the DAG, and synchronizes the DAG and notebook payload to Cloud Composer's GCS bucket from the terminal:
 
 ```bash
-/opt/micromamba/envs/jupyterlab/bin/python3 -m dataproc_scheduler_diagnostics.cli schedule \
+$PYTHON_EXEC -m dataproc_scheduler_diagnostics.cli schedule \
     --cluster=<DATAPROC_CLUSTER_NAME> \
     --composer-env=<COMPOSER_ENV_NAME> \
     --job-name="daily-spark-analysis" \
@@ -163,6 +187,21 @@ Executes the full end-to-end job creation, renders the DAG, and synchronizes the
 | **`impersonation_chain` missing on multi-tenant cluster** | Property `dataproc:dataproc.dynamic.multi.tenancy.enabled` is missing or not lowercase `"true"`. | Recreate cluster with `--properties=dataproc:dataproc.dynamic.multi.tenancy.enabled=true`. |
 | **Airflow DAG fails with `PERMISSION_DENIED: Failed to impersonate`** | Composer Worker SA does not have `Token Creator` role on Target SA. | Grant `roles/iam.serviceAccountTokenCreator` to the Composer Service Account on the Target Service Account: <br/>`gcloud iam service-accounts add-iam-policy-binding <TARGET_SA> --member="serviceAccount:<COMPOSER_SA>" --role="roles/iam.serviceAccountTokenCreator"` |
 | **Impersonation missing when running Serverless** | Serverless mode uses batch templates which do not support user impersonation chains. | Use Execution Mode: `Cluster` instead of `Serverless`. |
+
+---
+
+## 🧹 Uninstallation
+
+To completely remove the diagnostic tool and clean up the Workbench environment:
+
+```bash
+# 1. Uninstall the diagnostic package from the JupyterLab Python environment
+/opt/conda/envs/jupyterlab4/bin/python3 -m pip uninstall -y scheduler-jupyter-plugin-diagnostics
+# (or /opt/micromamba/envs/jupyterlab/bin/python3 -m pip uninstall -y scheduler-jupyter-plugin-diagnostics)
+
+# 2. Delete the cloned/extracted repository directory
+rm -rf /home/jupyter/scheduler-jupyter-plugin-diagnostics
+```
 
 ---
 
