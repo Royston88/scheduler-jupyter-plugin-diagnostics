@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling>=1.5.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scheduler-jupyter-plugin-diagnostics"
+version = "0.1.0"
+description = "Diagnostic CLI & DAG generation validation tool for JupyterLab Cloud Composer & Dataproc multi-tenancy impersonation chains."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.9"
+dependencies = [
+    "jinja2>=3.1.0",
+    "pydantic>=2.0.0"
+]
+
+[project.scripts]
+scheduler-plugin-diag = "dataproc_scheduler_diagnostics.cli:main"
+dataproc-scheduler-diag = "dataproc_scheduler_diagnostics.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dataproc_scheduler_diagnostics"]
